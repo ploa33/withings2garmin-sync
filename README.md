@@ -39,10 +39,39 @@ graph TD
 ## 🚀 Quick Setup
 
 ### 1. GitHub Secrets
-In your (private) GitHub repository: **Settings ➔ Secrets and variables ➔ Actions**:
-- `WITHINGS_CLIENT_ID` / `WITHINGS_CLIENT_SECRET` / `WITHINGS_REFRESH_TOKEN`
-- `GARMIN_EMAIL` / `GARMIN_PASSWORD`
-- `WEBHOOK_URL` (optional: the Google Apps Script URL if you set up the real-time webhook below)
+In your (private) GitHub repository, go to **Settings ➔ Secrets and variables ➔ Actions** and add the following secrets:
+
+#### Garmin Credentials
+- **`GARMIN_EMAIL`**: The email address you use to log into Garmin Connect.
+- **`GARMIN_PASSWORD`**: Your Garmin Connect password.
+
+#### Withings API Credentials
+To get your Withings Client ID and Secret, you need to create a free developer app:
+1. Go to the [Withings Developer Portal](https://developer.withings.com/developer-guide/v3/integration-guide/public-api/getting-started) and log in.
+2. Go to your Dashboard and click **Create an app**.
+3. Fill in the required fields (Name, Description). For the **Callback URI**, enter `https://example.com` (this is just a placeholder needed for the setup).
+4. Once created, you will get your **`WITHINGS_CLIENT_ID`** and **`WITHINGS_CLIENT_SECRET`**. Add both to your GitHub Secrets.
+
+#### Withings Refresh Token (`WITHINGS_REFRESH_TOKEN`)
+You need to generate an initial token so the script can access your personal data. The script will automatically renew it afterward.
+1. Open this URL in your web browser (replace `YOUR_CLIENT_ID` with the ID you just got):
+   `https://account.withings.com/oauth2_user/authorize2?response_type=code&client_id=YOUR_CLIENT_ID&state=init&scope=user.metrics,user.info&redirect_uri=https://example.com`
+2. Log in and allow access. You will be redirected to a page that might look broken at `example.com`.
+3. Look at the URL in your browser's address bar. It will look like: `https://example.com/?code=YOUR_AUTHORIZATION_CODE&state=init`. Copy the `YOUR_AUTHORIZATION_CODE` value.
+4. Open a terminal and run the following command (replace the 3 placeholders with your actual values):
+   ```bash
+   curl --request POST 'https://wbsapi.withings.net/v2/oauth2' \
+     --data-urlencode 'action=requesttoken' \
+     --data-urlencode 'grant_type=authorization_code' \
+     --data-urlencode 'client_id=YOUR_CLIENT_ID' \
+     --data-urlencode 'client_secret=YOUR_CLIENT_SECRET' \
+     --data-urlencode 'code=YOUR_AUTHORIZATION_CODE' \
+     --data-urlencode 'redirect_uri=https://example.com'
+   ```
+5. In the JSON response printed in your terminal, find the `"refresh_token"` string. Add this exact string as your **`WITHINGS_REFRESH_TOKEN`** GitHub Secret.
+
+#### Webhook URL
+- **`WEBHOOK_URL`** *(Optional)*: If you want real-time syncing, set up the Google Apps Script as described in Step 2 below. Once you click "Deploy", Google will give you a **Web app URL**. Save this URL as your `WEBHOOK_URL` secret.
 
 ### 2. Real-Time Webhook (Google Apps Script)
 1. Create a project on [Google Apps Script](https://script.google.com/) and paste this code:
