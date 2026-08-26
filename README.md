@@ -1,5 +1,7 @@
 # ⚖️ Withings ➔ Garmin Connect
 
+[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-Support-orange.svg?style=flat&logo=buy-me-a-coffee)](https://buymeacoffee.com/ploa33)
+
 > **⚠️ IMPORTANT**: Use the green **`Use this template`** button to create a **PRIVATE** repository. Do not make it public (session tokens are saved in the repo).
 
 Sync weigh-ins and body metrics from any **Withings Scale** (Body, Body+, Smart, Scan, Comp) to **Garmin Connect** in real-time (< 30s) — 100% Cloud, 0€, 0 server.
@@ -86,6 +88,14 @@ In **Settings ➔ Secrets and variables ➔ Actions**, add:
 
 Syncs Weight, Body Fat %, Muscle Mass, Hydration %, and Bone Mass with a 7-day automatic catch-up.
 Fallback safety cron runs twice daily (09:00 & 22:00 CEST).
+
+---
+
+## ☕ Support
+
+If this project saved you the cost of a Garmin Index scale or made your life easier, consider buying me a coffee!
+
+<a href="https://buymeacoffee.com/ploa33" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="45"></a>
 
 ---
 
