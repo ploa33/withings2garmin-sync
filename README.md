@@ -38,8 +38,13 @@ graph TD
 
 ## 🚀 Quick Setup
 
-### 1. GitHub Secrets
-In your (private) GitHub repository, go to **Settings ➔ Secrets and variables ➔ Actions** and add the following secrets:
+### 1. Create your Private Repository
+1. Click **Use this template** (or Fork this repository).
+2. ⚠️ **Make sure to set the repository visibility to Private** (or go to **Settings ➔ General ➔ Danger Zone ➔ Change visibility ➔ Make private** after forking).
+3. Enable GitHub Actions write permissions: Go to **Settings ➔ Actions ➔ General ➔ Workflow permissions**, select **"Read and write permissions"**, and click **Save** (required for persisting sessions across runs).
+
+### 2. GitHub Secrets
+In your private GitHub repository, go to **Settings ➔ Secrets and variables ➔ Actions** and add the following secrets:
 
 #### Garmin Credentials
 - **`GARMIN_EMAIL`**: The email address you use to log into Garmin Connect.
@@ -73,7 +78,7 @@ You need to generate an initial token so the script can access your personal dat
 #### Webhook URL
 - **`WEBHOOK_URL`** *(Optional)*: If you want real-time syncing, set up the Google Apps Script as described in Step 2 below. Once you click "Deploy", Google will give you a **Web app URL**. Save this URL as your `WEBHOOK_URL` secret.
 
-### 2. Real-Time Webhook (Google Apps Script)
+### 3. Real-Time Webhook (Google Apps Script)
 1. Create a project on [Google Apps Script](https://script.google.com/) and paste this code:
 
 ```javascript
