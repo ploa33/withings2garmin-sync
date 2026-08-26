@@ -1,0 +1,79 @@
+name: "Withings → Garmin Daily Sync"
+
+on:
+  # Webhook temps réel via Google Apps Script (repository_dispatch)
+  repository_dispatch:
+    types: [withings_sync]
+  # Synchronisation planifiée de sécurité (09:00 et 22:00 heure française)
+  schedule:
+    - cron: "0 7,20 * * *"
+  # Déclenchement manuel avec mode simulation optionnel
+  workflow_dispatch:
+    inputs:
+      simulate:
+        description: '🧪 Simuler une fausse pesée (74.5 kg, 17.8% fat, muscle, hydratation, os)'
+        type: boolean
+        required: false
+        default: false
+
+# Required to commit the updated tokens.json and garth_session/ back to the repo
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    name: "Sync body composition"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      # ── 1. Checkout ─────────────────────────────────────────────────────────
+      - name: "⬇️  Checkout repository"
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true   # needed for the git push step below
+          fetch-depth: 1
+
+      # ── 2. Python setup ──────────────────────────────────────────────────────
+      - name: "🐍  Set up Python 3.11"
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      # ── 3. Install dependencies ──────────────────────────────────────────────
+      - name: "📦  Install dependencies"
+        run: pip install -r requirements.txt
+
+      # ── 4. Run the sync script ───────────────────────────────────────────────
+      - name: "🔄  Run sync"
+        env:
+          WITHINGS_CLIENT_ID:     ${{ secrets.WITHINGS_CLIENT_ID }}
+          WITHINGS_CLIENT_SECRET: ${{ secrets.WITHINGS_CLIENT_SECRET }}
+          WITHINGS_REFRESH_TOKEN: ${{ secrets.WITHINGS_REFRESH_TOKEN }}
+          GARMIN_EMAIL:           ${{ secrets.GARMIN_EMAIL }}
+          GARMIN_PASSWORD:        ${{ secrets.GARMIN_PASSWORD }}
+          WEBHOOK_URL:            ${{ secrets.WEBHOOK_URL }}
+          SIMULATE:               ${{ inputs.simulate }}
+        run: python sync.py
+
+      # ── 5. Persist updated tokens & Garmin session ───────────────────────────
+      # Commits tokens.json (new Withings refresh token) and garth_session/
+      # (Garmin SSO cookies/tokens) so the next run can reuse them without
+      # a full re-authentication.
+      # [skip ci] prevents this commit from triggering a new workflow run.
+      - name: "💾  Commit updated tokens & Garmin session"
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Stage both artefacts (|| true so the step never fails if unchanged)
+          git add tokens.json garth_session/ || true
+
+          # Only commit if there is actually something staged
+          if git diff --cached --quiet; then
+            echo "Nothing changed — skipping commit."
+          else
+            git commit -m "chore: update Withings tokens & Garmin session [skip ci]"
+            git push
+          fi
