@@ -39,9 +39,9 @@ graph TD
 ## 🚀 Quick Setup
 
 ### 1. Create your Private Repository
-1. Click **Use this template** (or Fork this repository).
-2. ⚠️ **Make sure to set the repository visibility to Private** (or go to **Settings ➔ General ➔ Danger Zone ➔ Change visibility ➔ Make private** after forking).
-3. Enable GitHub Actions write permissions: Go to **Settings ➔ Actions ➔ General ➔ Workflow permissions**, select **"Read and write permissions"**, and click **Save** (required for persisting sessions across runs).
+1. Click the green **Use this template** button at the top of this repository (or create a new empty private repository and push this code).
+2. ⚠️ **Set the repository visibility to Private** during creation so your tokens remain hidden.
+3. Enable GitHub Actions write permissions: In your new private repo, go to **Settings ➔ Actions ➔ General ➔ Workflow permissions**, select **"Read and write permissions"**, and click **Save** (required for persisting sessions across runs).
 
 ### 2. GitHub Secrets
 In your private GitHub repository, go to **Settings ➔ Secrets and variables ➔ Actions** and add the following secrets:
