@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Withings Body+ → Garmin Connect daily sync.
+Withings Smart Scales (Body, Body+, Body Smart, Body Scan, Body Comp) → Garmin Connect daily sync.
 
 Runs as a GitHub Actions workflow; persists Withings OAuth tokens and the
 garth (Garmin SSO) session across runs to avoid token expiry and
@@ -261,7 +261,7 @@ def upload_to_garmin(
 
 def main() -> None:
     print("=" * 60)
-    print("  Withings Body+ → Garmin Connect Sync")
+    print("  Withings Scales → Garmin Connect Sync")
     print(f"  {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}")
     print("=" * 60)
 

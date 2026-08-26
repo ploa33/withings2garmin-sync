@@ -1,8 +1,8 @@
-# ⚖️ Withings Body+ ➔ Garmin Connect
+# ⚖️ Withings Smart Scales ➔ Garmin Connect
 
 > **⚠️ SECURITY WARNING**: This template is designed to be used as a **PRIVATE** repository. The GitHub Actions workflow automatically commits your sensitive authentication tokens (`tokens.json` and `garth_session/`) back to the repository to keep your session alive. **If you make your fork public, anyone will have access to your Withings and Garmin accounts.**
 
-Automatic and real-time synchronization (< 30s) of weigh-ins and body composition from a **Withings / Nokia Body+** scale to **Garmin Connect** (100% Cloud, 0€, 0 server).
+Automatic and real-time synchronization (< 30s) of weigh-ins and body composition from **Withings / Nokia Smart Scales** (Body, Body+, Body Smart, Body Scan, Body Comp, Cardio) to **Garmin Connect** (100% Cloud, 0€, 0 server).
 
 ---
 
