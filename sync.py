@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-Withings Smart Scales (Body, Body+, Body Smart, Body Scan, Body Comp) → Garmin Connect daily sync.
+Withings Scales (Body, Body+, Body Smart, Body Scan, Body Comp) → Garmin Connect daily sync.
 
 Runs as a GitHub Actions workflow; persists Withings OAuth tokens and the
 garth (Garmin SSO) session across runs to avoid token expiry and
 Cloudflare anti-bot challenges.
 
-Lookback window: last 7 days (catches missed runs automatically).
+Lookback window: last 30 days (syncs all weigh-ins chronologically).
 """
 
 import json
@@ -20,11 +20,11 @@ import garminconnect
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 
-WITHINGS_API     = "https://wbsapi.withings.net"
-TOKENS_FILE      = Path("tokens.json")
+WITHINGS_API      = "https://wbsapi.withings.net"
+TOKENS_FILE       = Path("tokens.json")
 GARTH_SESSION_DIR = Path("garth_session")
-WEBHOOK_URL      = os.environ.get("WEBHOOK_URL", "")
-LOOKBACK_DAYS    = 7
+WEBHOOK_URL       = os.environ.get("WEBHOOK_URL", "").strip()
+LOOKBACK_DAYS     = int(os.environ.get("LOOKBACK_DAYS", "30"))
 
 # Withings measure type IDs → friendly names
 MEASURE_TYPES = {
@@ -142,13 +142,12 @@ def decode_value(value: int, unit: int) -> float:
     return value * (10 ** unit)
 
 
-def fetch_withings_measures(access_token: str) -> list[dict]:
+def fetch_withings_measures(access_token: str, lookback_days: int = LOOKBACK_DAYS) -> list[dict]:
     """
-    Fetch body-composition measurement groups from the last LOOKBACK_DAYS days.
-    Returns groups sorted newest-first.
+    Fetch body-composition measurement groups from the last lookback_days days.
     """
     startdate = int(
-        (datetime.now(timezone.utc) - timedelta(days=LOOKBACK_DAYS)).timestamp()
+        (datetime.now(timezone.utc) - timedelta(days=lookback_days)).timestamp()
     )
 
     resp = requests.get(
@@ -170,21 +169,54 @@ def fetch_withings_measures(access_token: str) -> list[dict]:
         sys.exit(1)
 
     groups = body["body"].get("measuregrps", [])
-    print(f"📊 Found {len(groups)} measurement group(s) in the last "
-          f"{LOOKBACK_DAYS} days")
-
-    # Newest first
-    return sorted(groups, key=lambda g: g["date"], reverse=True)
+    print(f"📊 Found {len(groups)} measurement group(s) in the last {lookback_days} days")
+    return groups
 
 
 def parse_measure_group(group: dict) -> dict:
     """Parse a Withings measure group dict into named float values."""
     result: dict[str, float] = {}
-    for measure in group["measures"]:
+    for measure in group.get("measures", []):
         key = MEASURE_TYPES.get(measure["type"])
         if key:
             result[key] = round(decode_value(measure["value"], measure["unit"]), 4)
     return result
+
+
+def group_measurements(groups: list[dict]) -> list[tuple[datetime, dict]]:
+    """
+    Cluster Withings measure groups into distinct weigh-in sessions.
+    Groups within 300 seconds of each other are merged (e.g., weight + impedance).
+    Returns list of (datetime, measures_dict) sorted chronologically (oldest first).
+    """
+    sorted_groups = sorted(groups, key=lambda g: g["date"])
+    events: list[dict] = []
+
+    for g in sorted_groups:
+        parsed = parse_measure_group(g)
+        if not parsed:
+            continue
+        g_date = g["date"]
+
+        if events and abs(g_date - events[-1]["date"]) <= 300:
+            for k, v in parsed.items():
+                events[-1]["measures"][k] = v
+            if "weight" in parsed:
+                events[-1]["has_weight"] = True
+        else:
+            events.append({
+                "date": g_date,
+                "measures": parsed,
+                "has_weight": "weight" in parsed,
+            })
+
+    valid_events: list[tuple[datetime, dict]] = []
+    for ev in events:
+        if ev["has_weight"] and ev["measures"].get("weight"):
+            dt = datetime.fromtimestamp(ev["date"], tz=timezone.utc)
+            valid_events.append((dt, ev["measures"]))
+
+    return valid_events
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -194,9 +226,6 @@ def parse_measure_group(group: dict) -> dict:
 def get_garmin_client(email: str, password: str) -> garminconnect.Garmin:
     """
     Return an authenticated Garmin client using tokenstore caching.
-    
-    garminconnect 0.3+ handles loading/dumping session tokens directly via
-    garmin.login(tokenstore=...).
     """
     garmin = garminconnect.Garmin(email, password)
     GARTH_SESSION_DIR.mkdir(exist_ok=True)
@@ -233,16 +262,13 @@ def upload_to_garmin(
 
     timestamp_str = measure_dt.isoformat()
 
-    print("\n  📤 Payload to Garmin Connect:")
-    print(f"     Timestamp   : {timestamp_str}")
+    print(f"\n  📤 Syncing weigh-in: {measure_dt.strftime('%Y-%m-%d %H:%M:%S UTC')}")
     print(f"     Weight      : {weight} kg")
-    print(f"     Fat         : {fat_percent} %")
-    print(f"     Muscle mass : {muscle_mass_kg} kg")
-    print(f"     Hydration   : {hydration_percent} % "
-          f"(raw {hydration_kg} kg)")
-    print(f"     Bone mass   : {bone_mass_kg} kg")
+    print(f"     Fat         : {fat_percent} %" if fat_percent is not None else "     Fat         : --")
+    print(f"     Muscle mass : {muscle_mass_kg} kg" if muscle_mass_kg is not None else "     Muscle mass : --")
+    print(f"     Hydration   : {hydration_percent} %" if hydration_percent is not None else "     Hydration   : --")
+    print(f"     Bone mass   : {bone_mass_kg} kg" if bone_mass_kg is not None else "     Bone mass   : --")
 
-    # garminconnect 0.3.x uses add_body_composition
     garmin.add_body_composition(
         timestamp=timestamp_str,
         weight=weight,
@@ -252,7 +278,7 @@ def upload_to_garmin(
         muscle_mass=muscle_mass_kg,
     )
 
-    print("✅ Successfully synced to Garmin Connect!")
+    print("     ✅ Synced to Garmin Connect!")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -261,7 +287,7 @@ def upload_to_garmin(
 
 def main() -> None:
     print("=" * 60)
-    print("  Withings Scales → Garmin Connect Sync")
+    print("  Withings Body+ → Garmin Connect Sync")
     print(f"  {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}")
     print("=" * 60)
 
@@ -294,64 +320,56 @@ def main() -> None:
 
     # ── Step 2 — Fetch measures ───────────────────────────────────────────────
     is_simulation = "--simulate" in sys.argv or os.environ.get("SIMULATE", "").lower() == "true"
+    
+    # Check custom lookback argument e.g. --days 60
+    lookback = LOOKBACK_DAYS
+    for i, arg in enumerate(sys.argv):
+        if arg in ("--days", "-d") and i + 1 < len(sys.argv):
+            try:
+                lookback = int(sys.argv[i + 1])
+            except ValueError:
+                pass
+
     if is_simulation:
         print("\n🧪 SIMULATION MODE ACTIVATED — Injecting fake weight & body composition data")
-        selected_measures = {
-            "weight": 74.5,
-            "fat_percent": 17.8,
-            "muscle_mass": 36.1,
-            "hydration": 41.0,  # 41.0 / 74.5 * 100 = 55.03%
-            "bone_mass": 3.2,
-        }
-        measure_dt = datetime.now(timezone.utc)
-        print(f"📅 Simulated measurement time: {measure_dt.strftime('%Y-%m-%d %H:%M:%S UTC')}")
-        print(f"📊 Extracted measures (SIMULATED): {selected_measures}")
+        weigh_ins = [
+            (
+                datetime.now(timezone.utc),
+                {
+                    "weight": 74.5,
+                    "fat_percent": 17.8,
+                    "muscle_mass": 36.1,
+                    "hydration": 41.0,
+                    "bone_mass": 3.2,
+                }
+            )
+        ]
     else:
-        print(f"\n── Step 2 / 4 : Fetch Withings measures (last {LOOKBACK_DAYS} days) ──")
-        groups = fetch_withings_measures(token_data["access_token"])
+        print(f"\n── Step 2 / 4 : Fetch Withings measures (last {lookback} days) ──")
+        groups = fetch_withings_measures(token_data["access_token"], lookback_days=lookback)
 
         if not groups:
-            print(f"ℹ️  No measurements found in the last {LOOKBACK_DAYS} days.")
+            print(f"ℹ️  No measurements found in the last {lookback} days.")
             print("   Nothing to sync — exiting cleanly.")
             sys.exit(0)
 
-        # Pick the most recent group that contains at least a weight reading
-        selected_group: dict | None = None
-        selected_measures: dict = {}
+        weigh_ins = group_measurements(groups)
+        print(f"📈 Found {len(weigh_ins)} distinct weigh-in session(s) to sync.")
 
-        for group in groups:
-            parsed = parse_measure_group(group)
-            if parsed.get("weight"):
-                selected_group    = group
-                selected_measures = parsed
-                break
-
-        if selected_group is None:
-            print("ℹ️  No group with a valid weight measurement found — nothing to sync.")
+        if not weigh_ins:
+            print("ℹ️  No valid weigh-in with weight found — nothing to sync.")
             sys.exit(0)
-
-        # Merge any secondary measurement groups within 300 seconds (e.g. separate impedance group)
-        selected_time = selected_group["date"]
-        for group in groups:
-            if abs(group["date"] - selected_time) <= 300:
-                parsed = parse_measure_group(group)
-                for k, v in parsed.items():
-                    if k not in selected_measures:
-                        selected_measures[k] = v
-
-        measure_dt = datetime.fromtimestamp(selected_group["date"], tz=timezone.utc)
-        print(f"📅 Selected measurement: {measure_dt.strftime('%Y-%m-%d %H:%M:%S UTC')}")
-        print(f"📊 Extracted measures: {selected_measures}")
 
     # ── Step 3 — Garmin authentication ───────────────────────────────────────
     print("\n── Step 3 / 4 : Garmin Connect authentication ──")
     garmin = get_garmin_client(garmin_email, garmin_password)
 
-    # ── Step 4 — Upload ───────────────────────────────────────────────────────
-    print("\n── Step 4 / 4 : Upload body composition to Garmin Connect ──")
-    upload_to_garmin(garmin, measure_dt, selected_measures)
+    # ── Step 4 — Upload all weigh-ins ─────────────────────────────────────────
+    print(f"\n── Step 4 / 4 : Upload {len(weigh_ins)} weigh-in(s) to Garmin Connect ──")
+    for measure_dt, measures in weigh_ins:
+        upload_to_garmin(garmin, measure_dt, measures)
 
-    print("\n🎉 Sync complete.\n")
+    print("\n🎉 Sync complete for all measurements.\n")
 
 
 if __name__ == "__main__":
