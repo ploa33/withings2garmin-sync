@@ -12,6 +12,7 @@ Lookback window: last 30 days (syncs all weigh-ins chronologically).
 import json
 import os
 import sys
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -74,10 +75,13 @@ def load_withings_tokens() -> dict:
       2. WITHINGS_REFRESH_TOKEN environment / GitHub secret (first run).
     """
     if TOKENS_FILE.exists():
-        tokens = json.loads(TOKENS_FILE.read_text())
-        if tokens.get("refresh_token"):
-            print("📂 Loaded Withings tokens from tokens.json")
-            return tokens
+        try:
+            tokens = json.loads(TOKENS_FILE.read_text())
+            if tokens.get("refresh_token"):
+                print("📂 Loaded Withings tokens from tokens.json")
+                return tokens
+        except Exception:
+            pass
 
     refresh_token = os.environ.get("WITHINGS_REFRESH_TOKEN", "").strip()
     if not refresh_token:
@@ -93,39 +97,54 @@ def refresh_withings_token(
     client_id: str,
     client_secret: str,
     refresh_token: str,
+    max_retries: int = 3,
 ) -> dict:
-    """Exchange a refresh_token for a new access_token + refresh_token pair."""
-    resp = requests.post(
-        f"{WITHINGS_API}/v2/oauth2",
-        data={
-            "action":        "requesttoken",
-            "grant_type":    "refresh_token",
-            "client_id":     client_id,
-            "client_secret": client_secret,
-            "refresh_token": refresh_token,
-        },
-        timeout=30,
-    )
-    resp.raise_for_status()
-    body = resp.json()
+    """Exchange a refresh_token for a new access_token + refresh_token pair with retry on 601."""
+    for attempt in range(max_retries + 1):
+        resp = requests.post(
+            f"{WITHINGS_API}/v2/oauth2",
+            data={
+                "action":        "requesttoken",
+                "grant_type":    "refresh_token",
+                "client_id":     client_id,
+                "client_secret": client_secret,
+                "refresh_token": refresh_token,
+            },
+            timeout=30,
+        )
+        resp.raise_for_status()
+        body = resp.json()
+        status = body.get("status")
 
-    if body.get("status") != 0:
-        print(f"❌ Withings token refresh failed (status={body.get('status')}): "
+        if status == 0:
+            print("🔄 Withings access token refreshed successfully")
+            return body["body"]
+
+        # 601: Same arguments in less than 10 seconds (consecutive webhook calls)
+        if status == 601 and attempt < max_retries:
+            wait_sec = 12
+            print(f"⏳ Withings rate limit (status=601: Same arguments in <10s). Waiting {wait_sec}s before retrying (attempt {attempt + 1}/{max_retries})...")
+            time.sleep(wait_sec)
+            continue
+
+        print(f"❌ Withings token refresh failed (status={status}): "
               f"{body.get('error', body)}")
         sys.exit(1)
 
-    print("🔄 Withings access token refreshed successfully")
-    return body["body"]
-
 
 def save_withings_tokens(token_data: dict) -> None:
-    """Persist the refreshed Withings tokens to disk for the next run."""
+    """Persist the refreshed Withings tokens and expiry timestamp to disk."""
+    now_ts = int(time.time())
+    expires_in = int(token_data.get("expires_in", 10800))
+    expires_at = token_data.get("expires_at", now_ts + expires_in)
+
     TOKENS_FILE.write_text(
         json.dumps(
             {
                 "access_token":  token_data["access_token"],
                 "refresh_token": token_data["refresh_token"],
                 "userid":        token_data.get("userid", ""),
+                "expires_at":    expires_at,
             },
             indent=2,
         )
@@ -311,11 +330,22 @@ def main() -> None:
         sys.exit(1)
 
     # ── Step 1 — Withings OAuth2 ──────────────────────────────────────────────
-    print("\n── Step 1 / 4 : Withings OAuth2 token refresh ──")
-    tokens     = load_withings_tokens()
-    token_data = refresh_withings_token(client_id, client_secret,
-                                        tokens["refresh_token"])
-    save_withings_tokens(token_data)
+    print("\n── Step 1 / 4 : Withings OAuth2 token ──")
+    tokens = load_withings_tokens()
+    access_token = tokens.get("access_token")
+    expires_at = tokens.get("expires_at", 0)
+    now_ts = int(time.time())
+
+    # If access_token is cached and valid for at least 10 more minutes, reuse it
+    if access_token and expires_at > now_ts + 600:
+        remaining_min = (expires_at - now_ts) // 60
+        print(f"🔑 Using valid cached Withings access token (expires in {remaining_min} min)")
+        token_data = tokens
+    else:
+        token_data = refresh_withings_token(client_id, client_secret,
+                                            tokens["refresh_token"])
+        save_withings_tokens(token_data)
+
     ensure_withings_webhook(token_data["access_token"])
 
     # ── Step 2 — Fetch measures ───────────────────────────────────────────────

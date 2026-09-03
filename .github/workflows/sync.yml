@@ -20,9 +20,16 @@ on:
 permissions:
   contents: write
 
+# Prevent concurrent sync runs from racing / conflicting
+concurrency:
+  group: sync-lock
+  cancel-in-progress: false
+
 jobs:
   sync:
     name: "Sync body composition"
+    # Skip execution on the public template repository where secrets are not set
+    if: github.repository != 'ploa33/withings2garmin-sync'
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -75,5 +82,6 @@ jobs:
             echo "Nothing changed — skipping commit."
           else
             git commit -m "chore: update Withings tokens & Garmin session [skip ci]"
+            git pull --rebase origin main || true
             git push
           fi
